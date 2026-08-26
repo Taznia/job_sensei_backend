@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Application } from '../models/Application.js';
 import { Job } from '../models/Job.js';
 import { Post } from '../models/Post.js';
+import { Report } from '../models/Report.js';
 import { User } from '../models/User.js';
 import { Community } from '../models/Community.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -13,6 +14,7 @@ export const updateUserSchema = z.object({
   body: z.object({
     role: z.enum(['seeker', 'recruiter', 'admin']).optional(),
     isBanned: z.boolean().optional(),
+    employerStatus: z.enum(['pending', 'verified', 'rejected']).optional(),
   }),
 });
 
@@ -40,6 +42,10 @@ export const updateUser = asyncHandler(async (req, res) => {
   return ok(res, user.toPublic());
 });
 
+export const listReports = asyncHandler(async (_req, res) => {
+  const reports = await Report.find().sort({ createdAt: -1 }).limit(200);
+  return ok(res, reports);
+});
 export const deletePost = asyncHandler(async (req, res) => {
   const post = await Post.findById(req.params.id);
   if (!post) throw new HttpError(404, 'Post not found.');

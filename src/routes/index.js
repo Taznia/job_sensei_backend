@@ -4,12 +4,15 @@ import { optionalAuth, requireAuth, requireRole } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import { validate } from '../middleware/validate.js';
 import * as admin from '../controllers/admin.controller.js';
+import * as ai from '../controllers/ai.controller.js';
 import * as applications from '../controllers/applications.controller.js';
 import * as auth from '../controllers/auth.controller.js';
 import * as communities from '../controllers/communities.controller.js';
 import * as files from '../controllers/files.controller.js';
 import * as jobs from '../controllers/jobs.controller.js';
 import * as learning from '../controllers/learning.controller.js';
+import * as learningProgress from '../controllers/learningProgress.controller.js';
+import * as learningPaths from '../controllers/learningPaths.controller.js';
 import * as notifications from '../controllers/notifications.controller.js';
 import * as posts from '../controllers/posts.controller.js';
 import * as resumes from '../controllers/resumes.controller.js';
@@ -29,6 +32,7 @@ api.post('/auth/forgot-password', validate(auth.authValidators.emailSchema), aut
 api.post('/auth/verify-otp', validate(auth.authValidators.otpSchema), auth.verifyOtp);
 api.post('/auth/reset-password', validate(auth.authValidators.resetSchema), auth.resetPassword);
 api.get('/auth/me', requireAuth, auth.me);
+api.post('/ai/chat', requireAuth, validate(ai.chatSchema), ai.chat);
 api.patch(
   '/auth/password',
   requireAuth,
@@ -43,6 +47,7 @@ api.get('/users/:id', users.getUser);
 api.get('/jobs', optionalAuth, jobs.listJobs);
 api.get('/jobs/recommended', requireAuth, jobs.recommendedJobs);
 api.get('/jobs/saved', requireAuth, jobs.savedJobs);
+api.post('/jobs/:id/skill-gap', requireAuth, requireRole('seeker'), jobs.skillGapForJob);
 api.get('/jobs/:id', optionalAuth, jobs.getJob);
 api.post('/jobs/:id/save', requireAuth, jobs.saveJob);
 api.delete('/jobs/:id/save', requireAuth, jobs.unsaveJob);
@@ -94,6 +99,11 @@ api.post(
 api.get('/communities/:id', optionalAuth, communities.getCommunity);
 api.post('/communities/:id/join', requireAuth, communities.joinCommunity);
 api.delete('/communities/:id/leave', requireAuth, communities.leaveCommunity);
+api.delete(
+  '/communities/:id/members/:userId',
+  requireAuth,
+  communities.removeMember,
+);
 
 api.get('/posts', optionalAuth, posts.listPosts);
 api.post('/posts', requireAuth, upload.array('files', 5), posts.createPost);
@@ -105,25 +115,37 @@ api.post(
   requireAuth,
   validate(posts.commentSchema),
   posts.addComment,
+);api.post(
+  '/posts/:id/report',
+  requireAuth,
+  validate(posts.reportSchema),
+  posts.reportPost,
 );
 api.delete('/posts/:id', requireAuth, posts.deletePost);
 
-api.get('/learning/skill-gaps', optionalAuth, learning.skillGaps);
+api.get('/learning/skills', requireAuth, requireRole('seeker'), learningPaths.listSkills);
+api.get('/learning/skills/:skillId/paths', requireAuth, requireRole('seeker'), learningPaths.listPathsForSkill);
+api.get('/learning/paths/:pathId', requireAuth, requireRole('seeker'), learningPaths.getPath);
+api.get('/learning/skill-gaps', requireAuth, requireRole('seeker'), learning.skillGaps);
 api.put(
   '/learning/skills',
   requireAuth,
   validate(learning.updateSkillsSchema),
   learning.updateSkills,
 );
-api.get('/learning/resources', learning.listResources);
-api.get('/learning/bookmarks', requireAuth, learning.listBookmarks);
+api.get('/learning/resources', requireAuth, requireRole('seeker'), learning.listResources);
+api.get('/learning/bookmarks', requireAuth, requireRole('seeker'), learning.listBookmarks);
 api.post(
   '/learning/bookmarks',
   requireAuth,
+  requireRole('seeker'),
   validate(learning.bookmarkSchema),
   learning.addBookmark,
 );
-api.delete('/learning/bookmarks/:id', requireAuth, learning.removeBookmark);
+api.delete('/learning/bookmarks/:id', requireAuth, requireRole('seeker'), learning.removeBookmark);
+api.get('/learning/paths/:pathId/progress', requireAuth, requireRole('seeker'), learningProgress.listPathProgress);
+api.post('/learning/resources/:resourceId/start', requireAuth, requireRole('seeker'), learningProgress.startResource);
+api.post('/learning/resources/:resourceId/complete', requireAuth, requireRole('seeker'), learningProgress.completeResource);
 
 api.get('/notifications', requireAuth, notifications.listNotifications);
 api.patch('/notifications/:id/read', requireAuth, notifications.markRead);
@@ -140,4 +162,65 @@ api.patch(
   validate(admin.updateUserSchema),
   admin.updateUser,
 );
+api.get('/admin/reports', requireAuth, requireRole('admin'), admin.listReports);
 api.delete('/admin/posts/:id', requireAuth, requireRole('admin'), admin.deletePost);
+api.post(
+  '/admin/skills',
+  requireAuth,
+  requireRole('admin'),
+  validate(learningPaths.createSkillSchema),
+  learningPaths.createSkill,
+);
+api.post(
+  '/admin/learning-paths',
+  requireAuth,
+  requireRole('admin'),
+  validate(learningPaths.createPathSchema),
+  learningPaths.createPath,
+);
+api.put(
+  '/admin/learning-paths/:pathId',
+  requireAuth,
+  requireRole('admin'),
+  validate(learningPaths.updatePathSchema),
+  learningPaths.updatePath,
+);
+api.patch(
+  '/admin/learning-paths/:pathId/publish',
+  requireAuth,
+  requireRole('admin'),
+  learningPaths.publishPath,
+);
+api.post(
+  '/admin/learning-paths/:pathId/lessons',
+  requireAuth,
+  requireRole('admin'),
+  validate(learningPaths.lessonSchema),
+  learningPaths.addLesson,
+);
+api.put(
+  '/admin/lessons/:lessonId',
+  requireAuth,
+  requireRole('admin'),
+  validate(learningPaths.updateLessonSchema),
+  learningPaths.updateLesson,
+);
+api.delete(
+  '/admin/lessons/:lessonId',
+  requireAuth,
+  requireRole('admin'),
+  learningPaths.deleteLesson,
+);
+api.post(
+  '/admin/lessons/:lessonId/resources',
+  requireAuth,
+  requireRole('admin'),
+  validate(learningPaths.resourceSchema),
+  learningPaths.addResource,
+);
+api.delete(
+  '/admin/resources/:resourceId',
+  requireAuth,
+  requireRole('admin'),
+  learningPaths.deleteResource,
+);

@@ -29,6 +29,10 @@ export function requireRole(...roles) {
       next(new HttpError(403, 'You do not have permission to do that.'));
       return;
     }
+    if (req.user.role === 'recruiter' && req.user.employerStatus !== 'verified') {
+      next(new HttpError(403, 'Your employer account is waiting for admin verification.'));
+      return;
+    }
     next();
   };
 }

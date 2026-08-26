@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { persistUploads } from '../middleware/upload.js';
 import { Community } from '../models/Community.js';
 import { Post } from '../models/Post.js';
+import { Report } from '../models/Report.js';
 import { notify } from '../services/notification.service.js';
 import { awardXp } from '../services/reward.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -21,6 +22,13 @@ export const createPostSchema = z.object({
 export const commentSchema = z.object({
   body: z.object({
     body: z.string().trim().min(1).max(1000),
+    parentCommentId: z.string().optional(),
+  }),
+});
+
+export const reportSchema = z.object({
+  body: z.object({
+    reason: z.string().trim().min(5).max(1000),
   }),
 });
 
@@ -48,6 +56,7 @@ function serializePost(post, userId) {
       authorId: item.authorId?.toString?.() || item.authorId,
       author: item.author,
       body: item.body,
+      parentCommentId: item.parentCommentId?.toString?.() || null,
       createdAt: item.createdAt,
     })),
     likeCount: likes.length,
@@ -138,10 +147,18 @@ export const toggleFollow = asyncHandler(async (req, res) => {
 
 export const addComment = asyncHandler(async (req, res) => {
   const post = await loadPost(req.params.id);
+  const { body, parentCommentId } = req.validated.body;
+  if (
+    parentCommentId &&
+    !post.comments.some((comment) => comment.id === parentCommentId)
+  ) {
+    throw new HttpError(404, 'Parent comment not found.');
+  }
   post.comments.push({
     authorId: req.user.id,
     author: req.user.name,
-    body: req.validated.body.body,
+    body,
+    parentCommentId: parentCommentId || undefined,
   });
   await post.save();
   if (post.authorId.toString() !== req.user.id) {
@@ -156,9 +173,35 @@ export const addComment = asyncHandler(async (req, res) => {
   return ok(res, serializePost(post, req.user.id));
 });
 
+export const reportPost = asyncHandler(async (req, res) => {
+  const post = await loadPost(req.params.id);
+  try {
+    const report = await Report.create({
+      reportedBy: req.user.id,
+      targetType: 'post',
+      targetId: post.id,
+      reason: req.validated.body.reason,
+    });
+    return created(res, { id: report.id, status: report.status });
+  } catch (error) {
+    if (error.code === 11000) {
+      throw new HttpError(409, 'You already reported this post.');
+    }
+    throw error;
+  }
+});
 export const deletePost = asyncHandler(async (req, res) => {
   const post = await loadPost(req.params.id);
-  if (post.authorId.toString() !== req.user.id && req.user.role !== 'admin') {
+  let isCommunityCreator = false;
+  if (post.communityId) {
+    const community = await Community.findById(post.communityId).select(
+      'createdById',
+    );
+    isCommunityCreator =
+      community?.createdById?.toString() === req.user.id;
+  }
+  const isAuthor = post.authorId.toString() === req.user.id;
+  if (!isAuthor && !isCommunityCreator && req.user.role !== 'admin') {
     throw new HttpError(403, 'You cannot delete this post.');
   }
   await post.deleteOne();

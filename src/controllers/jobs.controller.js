@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 import { Job } from '../models/Job.js';
+import { LearningPath } from '../models/LearningPath.js';
+import { Skill } from '../models/Skill.js';
+import { SkillCatalog } from '../models/SkillCatalog.js';
 import { User } from '../models/User.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { created, ok } from '../utils/apiResponse.js';
@@ -91,6 +94,70 @@ export const getJob = asyncHandler(async (req, res) => {
   return ok(res, serializeJob(job, req.user?.savedJobs || []));
 });
 
+// Module 3: compare this selected job with the signed-in seeker's skills.
+// Learning paths and lesson content remain owned by the Learning module.
+export const skillGapForJob = asyncHandler(async (req, res) => {
+  const job = await Job.findById(req.params.id);
+  if (!job) throw new HttpError(404, 'Job not found.');
+
+  const userSkills = new Set(
+    (req.user.skills || []).map((item) => item.name.trim().toLowerCase()),
+  );
+  const catalog = await SkillCatalog.findOne({ role: job.title });
+  const metadata = new Map(
+    (catalog?.skills || []).map((skill) => [skill.name.toLowerCase(), skill]),
+  );
+  const requiredSkills = job.skills.length ? job.skills : job.requirements;
+  const matchedSkills = [];
+  const missingNames = [];
+
+  for (const skillName of requiredSkills) {
+    if (userSkills.has(skillName.trim().toLowerCase())) matchedSkills.push(skillName);
+    else missingNames.push(skillName);
+  }
+
+  const skills = await Skill.find({
+    normalizedName: { $in: missingNames.map((name) => name.trim().toLowerCase()) },
+    status: 'active',
+  });
+  const paths = await LearningPath.find({
+    skillId: { $in: skills.map((skill) => skill.id) },
+    status: 'published',
+  });
+  const centralSkills = new Map(skills.map((skill) => [skill.normalizedName, skill]));
+  const pathsBySkill = new Map(paths.map((path) => [path.skillId.toString(), path]));
+
+  const missingSkills = missingNames.map((skillName) => {
+    const key = skillName.trim().toLowerCase();
+    const skill = metadata.get(key);
+    const centralSkill = centralSkills.get(key);
+    const path = centralSkill ? pathsBySkill.get(centralSkill.id) : null;
+    return {
+      skillId: centralSkill?.id || key.replace(/\s+/g, '-'),
+      skillName,
+      category:
+        centralSkill?.category?.toUpperCase().replace(/\s+/g, '_') ||
+        skill?.category?.toUpperCase().replace(/\s+/g, '_') ||
+        'TECHNICAL',
+      priority: skill?.priority?.toUpperCase() || 'HIGH',
+      reason:
+        skill?.impact ||
+        `${skillName} is listed as a requirement for the selected ${job.title} role.`,
+      learningPathAvailable: Boolean(path),
+      learningPathId: path?.id || null,
+    };
+  });
+
+  return ok(res, {
+    jobId: job.id,
+    jobTitle: job.title,
+    matchPercent: requiredSkills.length
+      ? Math.round((matchedSkills.length / requiredSkills.length) * 100)
+      : 0,
+    matchedSkills,
+    missingSkills,
+  });
+});
 export const createJob = asyncHandler(async (req, res) => {
   const job = await Job.create({ ...req.validated.body, recruiterId: req.user.id });
   return created(res, serializeJob(job));

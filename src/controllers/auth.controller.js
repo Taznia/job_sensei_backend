@@ -14,13 +14,21 @@ const registerSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8).max(72),
     role: z.enum(['seeker', 'recruiter']).optional(),
-  }),
+    organizationName: z.string().trim().min(2).max(120).optional(),
+  }).refine(
+    (body) => body.role !== 'recruiter' || Boolean(body.organizationName),
+    {
+      message: 'Organization name is required for employer accounts.',
+      path: ['organizationName'],
+    },
+  ),
 });
 
 const loginSchema = z.object({
   body: z.object({
     email: z.string().email(),
     password: z.string().min(1),
+    role: z.enum(['seeker', 'recruiter', 'admin']).optional(),
   }),
 });
 
@@ -68,7 +76,7 @@ export const authValidators = {
 };
 
 export const register = asyncHandler(async (req, res) => {
-  const { name, email, password, role } = req.validated.body;
+  const { name, email, password, role, organizationName } = req.validated.body;
   const existing = await findByEmail(email);
   if (existing) throw new HttpError(409, 'An account with that email already exists.');
 
@@ -77,6 +85,8 @@ export const register = asyncHandler(async (req, res) => {
     email,
     passwordHash: await User.hashPassword(password),
     role: role || 'seeker',
+    organizationName: role === 'recruiter' ? organizationName : '',
+    employerStatus: role === 'recruiter' ? 'pending' : 'not_applicable',
     headline: role === 'recruiter' ? 'Recruiter' : 'Job Sensei member',
   });
 
@@ -84,10 +94,11 @@ export const register = asyncHandler(async (req, res) => {
 });
 
 export const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.validated.body;
+  const { email, password, role } = req.validated.body;
   const user = await findByEmail(email);
-  if (!user || !(await user.comparePassword(password))) {
-    throw new HttpError(401, 'Invalid email or password.');
+  const passwordMatches = user && (await user.comparePassword(password));
+  if (!passwordMatches || (role && user.role !== role)) {
+    throw new HttpError(401, 'Invalid email, password, or account type.');
   }
   if (user.isBanned) throw new HttpError(403, 'This account is suspended.');
   return ok(res, authPayload(user));

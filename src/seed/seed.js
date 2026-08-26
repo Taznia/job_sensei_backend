@@ -58,8 +58,9 @@ async function seed() {
       email: 'recruiter@jobsensei.app',
       passwordHash: recruiterHash,
       role: 'recruiter',
+      organizationName: 'Northwind Labs',
+      employerStatus: 'verified',
       headline: 'Technical Recruiter',
-      company: 'Northwind Labs',
     },
     {
       name: 'Admin',
