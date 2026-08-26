@@ -1,8 +1,10 @@
 import { connectDb } from '../config/db.js';
+import { Job } from '../models/Job.js';
 import { LearningPath } from '../models/LearningPath.js';
 import { LearningResource } from '../models/LearningResource.js';
 import { Lesson } from '../models/Lesson.js';
 import { Skill } from '../models/Skill.js';
+import { SkillCatalog } from '../models/SkillCatalog.js';
 
 const curricula = [
   {
@@ -63,9 +65,55 @@ const curricula = [
   },
 ];
 
+function generatedCurriculum(skillName) {
+  return {
+    skill: {
+      name: skillName,
+      category: 'Career Skill',
+      description: 'Practical knowledge and applied capability for ' + skillName + '.',
+    },
+    path: {
+      title: skillName + ' Learning Path',
+      description:
+        'Build role-ready ' + skillName + ' knowledge through fundamentals, practice, and an applied project.',
+      difficulty: 'beginner',
+      estimatedDuration: '5 hours',
+    },
+    lessons: [
+      [
+        skillName + ' Fundamentals',
+        'Understand the essential concepts, vocabulary, and decisions in ' + skillName + '.',
+        '45 min',
+      ],
+      [
+        skillName + ' in Practice',
+        'Follow a practical workflow and apply ' + skillName + ' to realistic work.',
+        '60 min',
+      ],
+      [
+        skillName + ' Applied Project',
+        'Complete a guided project that demonstrates your ' + skillName + ' capability.',
+        '90 min',
+      ],
+    ],
+  };
+}
+
 async function seedLearning() {
   await connectDb();
-  for (const curriculum of curricula) {
+  const [jobSkills, catalogSkills] = await Promise.all([
+    Job.distinct('skills', { status: 'open' }),
+    SkillCatalog.distinct('skills.name'),
+  ]);
+  const authoredNames = new Set(
+    curricula.map((item) => item.skill.name.trim().toLowerCase()),
+  );
+  const generated = [...new Set([...jobSkills, ...catalogSkills])]
+    .filter((name) => name && !authoredNames.has(name.trim().toLowerCase()))
+    .map((name) => generatedCurriculum(name.trim()));
+  const allCurricula = [...curricula, ...generated];
+
+  for (const curriculum of allCurricula) {
     const normalizedName = curriculum.skill.name.toLowerCase();
     const skill = await Skill.findOneAndUpdate(
       { normalizedName },

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { fallbackSkillCatalogs, findCatalog, mergeSkillCatalogs } from '../data/skill-catalogs.js';
 import { LearningBookmark } from '../models/LearningBookmark.js';
 import { LearningResource } from '../models/LearningResource.js';
 import { SkillCatalog } from '../models/SkillCatalog.js';
@@ -29,27 +30,59 @@ export const bookmarkSchema = z.object({
 });
 
 export const skillGaps = asyncHandler(async (req, res) => {
-  const role = req.query.role || req.user?.targetRole || 'Senior Frontend Engineer';
-  const catalog = await SkillCatalog.findOne({ role });
-  if (!catalog) {
-    const roles = await SkillCatalog.find().select('role');
-    throw new HttpError(
-      404,
-      `No skill catalog for that role. Try: ${roles.map((item) => item.role).join(', ')}`,
-    );
-  }
+  const mongoCatalogs = await SkillCatalog.find().select('role skills').sort({ role: 1 });
+  const catalogs = mergeSkillCatalogs(mongoCatalogs);
+  const roles = catalogs.map((item) => item.role);
+  const requested = String(req.query.role || req.user?.targetRole || '').trim();
+  const catalog =
+    findCatalog(catalogs, requested) ||
+    findCatalog(catalogs, req.user?.targetRole) ||
+    catalogs[0] ||
+    fallbackSkillCatalogs[0];
   const levels = new Map(
-    (req.user?.skills || []).map((item) => [item.name.toLowerCase(), item.currentLevel]),
+    (req.user?.skills || []).map((item) => [
+      String(item.name || '').toLowerCase(),
+      Number(item.currentLevel || 0),
+    ]),
   );
-  const gaps = catalog.skills.map((skill) => ({
-    name: skill.name,
-    category: skill.category,
-    currentLevel: levels.get(skill.name.toLowerCase()) ?? 0,
-    requiredLevel: skill.requiredLevel,
-    priority: skill.priority,
-    impact: skill.impact,
-  }));
-  return ok(res, { role: catalog.role, gaps });
+  const gaps = (catalog.skills || []).map((skill) => {
+    const currentLevel = levels.get(String(skill.name).toLowerCase()) ?? 0;
+    const requiredLevel = Number(skill.requiredLevel || 80);
+    return {
+      name: skill.name,
+      category: skill.category,
+      currentLevel,
+      requiredLevel,
+      priority: skill.priority,
+      impact: skill.impact,
+      matched: currentLevel >= requiredLevel,
+    };
+  });
+  const matched = gaps.filter((item) => item.matched).length;
+  const fit =
+    gaps.length === 0
+      ? 0
+      : Math.round(
+          (gaps.reduce(
+            (sum, item) =>
+              sum + Math.min(item.currentLevel / Math.max(item.requiredLevel, 1), 1),
+            0,
+          ) /
+            gaps.length) *
+            100,
+        );
+  return ok(res, {
+    role: catalog.role,
+    targetRole: req.user?.targetRole || '',
+    roles,
+    gaps,
+    stats: {
+      matchPercent: fit,
+      total: gaps.length,
+      matched,
+      lacking: gaps.length - matched,
+    },
+  });
 });
 
 export const updateSkills = asyncHandler(async (req, res) => {

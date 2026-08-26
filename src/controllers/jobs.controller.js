@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { findCatalog, mergeSkillCatalogs } from '../data/skill-catalogs.js';
 import { Job } from '../models/Job.js';
 import { LearningPath } from '../models/LearningPath.js';
 import { Skill } from '../models/Skill.js';
@@ -100,24 +101,64 @@ export const skillGapForJob = asyncHandler(async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) throw new HttpError(404, 'Job not found.');
 
-  const userSkills = new Set(
-    (req.user.skills || []).map((item) => item.name.trim().toLowerCase()),
+  // req.user is loaded from MongoDB by requireAuth, so this always reflects
+  // the signed-in seeker's saved profile rather than frontend/demo data.
+  const profileSkills = new Map(
+    (req.user.skills || []).map((item) => [item.name.trim().toLowerCase(), item]),
   );
-  const catalog = await SkillCatalog.findOne({ role: job.title });
+  const mongoCatalogs = await SkillCatalog.find().select('role skills');
+  const catalog = findCatalog(mergeSkillCatalogs(mongoCatalogs), job.title);
+  const catalogSkills = catalog?.skills || [];
   const metadata = new Map(
-    (catalog?.skills || []).map((skill) => [skill.name.toLowerCase(), skill]),
+    catalogSkills.map((skill) => [skill.name.trim().toLowerCase(), skill]),
   );
-  const requiredSkills = job.skills.length ? job.skills : job.requirements;
+
+  // Analyze every skill explicitly attached to the job plus richer role-catalog
+  // skills. The normalized map removes duplicates while preserving display names.
+  const listedSkills = job.skills.length ? job.skills : job.requirements;
+  const requiredSkills = [
+    ...new Map(
+      [...listedSkills, ...catalogSkills.map((skill) => skill.name)].map((name) => [
+        name.trim().toLowerCase(),
+        name.trim(),
+      ]),
+    ).values(),
+  ].filter(Boolean);
+
   const matchedSkills = [];
-  const missingNames = [];
+  const gapSpecs = [];
+  let totalFit = 0;
 
   for (const skillName of requiredSkills) {
-    if (userSkills.has(skillName.trim().toLowerCase())) matchedSkills.push(skillName);
-    else missingNames.push(skillName);
+    const key = skillName.toLowerCase();
+    const profileSkill = profileSkills.get(key);
+    const catalogSkill = metadata.get(key);
+    const currentLevel = Number(profileSkill?.currentLevel || 0);
+    const requiredLevel = Number(catalogSkill?.requiredLevel || 80);
+    const deficit = Math.max(0, requiredLevel - currentLevel);
+    const priority =
+      catalogSkill?.priority || (deficit >= 50 ? 'high' : deficit >= 25 ? 'medium' : 'low');
+
+    totalFit += Math.min(currentLevel / Math.max(requiredLevel, 1), 1);
+    if (currentLevel >= requiredLevel) {
+      matchedSkills.push({ name: skillName, currentLevel, requiredLevel });
+    } else {
+      gapSpecs.push({
+        skillName,
+        key,
+        currentLevel,
+        requiredLevel,
+        priority,
+        category: catalogSkill?.category || profileSkill?.category || 'Technical skill',
+        reason:
+          catalogSkill?.impact ||
+          skillName + ' is listed as a requirement for the selected ' + job.title + ' role.',
+      });
+    }
   }
 
   const skills = await Skill.find({
-    normalizedName: { $in: missingNames.map((name) => name.trim().toLowerCase()) },
+    normalizedName: { $in: gapSpecs.map((item) => item.key) },
     status: 'active',
   });
   const paths = await LearningPath.find({
@@ -127,22 +168,17 @@ export const skillGapForJob = asyncHandler(async (req, res) => {
   const centralSkills = new Map(skills.map((skill) => [skill.normalizedName, skill]));
   const pathsBySkill = new Map(paths.map((path) => [path.skillId.toString(), path]));
 
-  const missingSkills = missingNames.map((skillName) => {
-    const key = skillName.trim().toLowerCase();
-    const skill = metadata.get(key);
-    const centralSkill = centralSkills.get(key);
+  const missingSkills = gapSpecs.map((gap) => {
+    const centralSkill = centralSkills.get(gap.key);
     const path = centralSkill ? pathsBySkill.get(centralSkill.id) : null;
     return {
-      skillId: centralSkill?.id || key.replace(/\s+/g, '-'),
-      skillName,
-      category:
-        centralSkill?.category?.toUpperCase().replace(/\s+/g, '_') ||
-        skill?.category?.toUpperCase().replace(/\s+/g, '_') ||
-        'TECHNICAL',
-      priority: skill?.priority?.toUpperCase() || 'HIGH',
-      reason:
-        skill?.impact ||
-        `${skillName} is listed as a requirement for the selected ${job.title} role.`,
+      skillId: centralSkill?.id || gap.key.replace(/s+/g, '-'),
+      skillName: gap.skillName,
+      category: gap.category.toUpperCase().replace(/s+/g, '_'),
+      priority: gap.priority.toUpperCase(),
+      currentLevel: gap.currentLevel,
+      requiredLevel: gap.requiredLevel,
+      reason: gap.reason,
       learningPathAvailable: Boolean(path),
       learningPathId: path?.id || null,
     };
@@ -152,7 +188,7 @@ export const skillGapForJob = asyncHandler(async (req, res) => {
     jobId: job.id,
     jobTitle: job.title,
     matchPercent: requiredSkills.length
-      ? Math.round((matchedSkills.length / requiredSkills.length) * 100)
+      ? Math.round((totalFit / requiredSkills.length) * 100)
       : 0,
     matchedSkills,
     missingSkills,

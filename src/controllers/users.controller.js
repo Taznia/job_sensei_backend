@@ -9,6 +9,8 @@ const skillSchema = z.object({
   name: z.string().trim().min(1),
   currentLevel: z.number().min(0).max(100).optional(),
   category: z.string().optional(),
+  yearsOfExperience: z.number().min(0).optional(),
+  isVerified: z.boolean().optional(),
 });
 
 export const updateMeSchema = z.object({
@@ -18,9 +20,16 @@ export const updateMeSchema = z.object({
     bio: z.string().max(2000).optional(),
     location: z.string().max(120).optional(),
     avatarUrl: z.string().optional(),
+    phone: z.string().max(40).optional(),
+    careerGoals: z.string().max(2000).optional(),
     targetRole: z.string().max(120).optional(),
     experienceYears: z.number().min(0).max(60).optional(),
     skills: z.array(skillSchema).optional(),
+    education: z.array(z.record(z.unknown())).optional(),
+    experience: z.array(z.record(z.unknown())).optional(),
+    certifications: z.array(z.record(z.unknown())).optional(),
+    portfolioLinks: z.array(z.record(z.unknown())).optional(),
+    preferences: z.record(z.unknown()).optional(),
   }),
 });
 

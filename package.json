@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node scripts/dev-server.js",
     "dev": "node --watch scripts/dev-server.js",
-    "seed": "node src/seed/seed.js"
+    "seed": "node src/seed/seed.js",
+    "seed:learning": "node src/seed/seed-learning-extra.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
