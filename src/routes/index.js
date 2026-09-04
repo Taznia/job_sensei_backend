@@ -7,8 +7,12 @@ import * as admin from '../controllers/admin.controller.js';
 import * as ai from '../controllers/ai.controller.js';
 import * as applications from '../controllers/applications.controller.js';
 import * as auth from '../controllers/auth.controller.js';
+import * as careerProfile from '../controllers/careerProfile.controller.js';
 import * as communities from '../controllers/communities.controller.js';
 import * as files from '../controllers/files.controller.js';
+import * as jobImport from '../controllers/jobImport.controller.js';
+import * as jobMatch from '../controllers/jobMatch.controller.js';
+import * as jobSearch from '../controllers/jobSearch.controller.js';
 import * as jobs from '../controllers/jobs.controller.js';
 import * as learning from '../controllers/learning.controller.js';
 import * as learningProgress from '../controllers/learningProgress.controller.js';
@@ -44,10 +48,31 @@ api.get('/users/me', requireAuth, users.getMe);
 api.patch('/users/me', requireAuth, validate(users.updateMeSchema), users.updateMe);
 api.get('/users/:id', users.getUser);
 
+// --- Career Profile (Module 1, 22301190) ------------------------------------
+// Every route acts on the caller's own profile, so no userId appears in a path.
+api.get('/career-profile/me', requireAuth, careerProfile.getMyProfile);
+api.put('/career-profile/me', requireAuth, validate(careerProfile.updateBasicsSchema), careerProfile.updateBasics);
+api.get('/career-profile/me/completeness', requireAuth, careerProfile.getCompleteness);
+api.put('/career-profile/me/preferences', requireAuth, validate(careerProfile.updatePreferencesSchema), careerProfile.updatePreferences);
+api.post('/career-profile/me/sections/:section', requireAuth, validate(careerProfile.sectionCreateSchema), careerProfile.addSectionEntry);
+api.put('/career-profile/me/sections/:section/:entryId', requireAuth, validate(careerProfile.sectionUpdateSchema), careerProfile.updateSectionEntry);
+api.delete('/career-profile/me/sections/:section/:entryId', requireAuth, validate(careerProfile.sectionDeleteSchema), careerProfile.deleteSectionEntry);
+
 api.get('/jobs', optionalAuth, jobs.listJobs);
 api.get('/jobs/recommended', requireAuth, jobs.recommendedJobs);
 api.get('/jobs/saved', requireAuth, jobs.savedJobs);
 api.post('/jobs/:id/skill-gap', requireAuth, requireRole('seeker'), jobs.skillGapForJob);
+// --- Modules 2/3/4 (22301190) -----------------------------------------------
+// These literal paths MUST stay above '/jobs/:id'. Express matches in order, so
+// a parameterised route first would swallow 'search', 'match' and 'import' as
+// job ids and fail casting them to ObjectId.
+api.get('/jobs/search', optionalAuth, validate(jobSearch.searchJobsSchema), jobSearch.searchJobs);
+api.get('/jobs/search/filters', jobSearch.getFilterOptions);
+api.get('/jobs/match/top', requireAuth, validate(jobMatch.matchTopJobsSchema), jobMatch.matchTopJobs);
+api.get('/jobs/import/status', jobImport.getImportStatus);
+// Open to any signed-in user; a 10-minute global cooldown bounds outbound calls
+// to the public boards. 'force' is honoured only for recruiters and admins.
+api.post('/jobs/import', requireAuth, validate(jobImport.runImportSchema), jobImport.runImport);
 api.get('/jobs/:id', optionalAuth, jobs.getJob);
 api.post('/jobs/:id/save', requireAuth, jobs.saveJob);
 api.delete('/jobs/:id/save', requireAuth, jobs.unsaveJob);
@@ -66,6 +91,7 @@ api.patch(
   jobs.updateJob,
 );
 api.delete('/jobs/:id', requireAuth, requireRole('recruiter', 'admin'), jobs.deleteJob);
+api.get('/jobs/:id/match', requireAuth, validate(jobMatch.matchJobSchema), jobMatch.matchJob);
 
 api.get('/applications', requireAuth, applications.listApplications);
 api.post(
