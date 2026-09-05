@@ -15,6 +15,10 @@ export const env = {
   clientOrigin: process.env.CLIENT_ORIGIN || '*',
   isDev: !isProd,
   isVercel: Boolean(process.env.VERCEL),
+
+  // AI Resume Match. The key stays server-side: the Flutter app never sees it.
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
 };
 
 if (isProd && !env.jwtSecret) {

@@ -17,6 +17,37 @@ export const createApplicationSchema = z.object({
   }),
 });
 
+/**
+ * Application Tracker — an application the user made outside Job Sensei.
+ *
+ * These carry no jobId, so there is no recruiter on the other side: the user
+ * owns the whole status timeline. That is why they get their own create and
+ * status routes rather than reusing the job-board ones above, whose permission
+ * rules (recruiter moves the status, applicant may only withdraw) do not apply.
+ */
+export const createTrackedApplicationSchema = z.object({
+  body: z.object({
+    jobTitle: z.string().trim().min(1, 'Job title is required.').max(200),
+    companyName: z.string().trim().min(1, 'Company name is required.').max(200),
+    resumeId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  }),
+});
+
+export const trackedStatusSchema = z.object({
+  body: z.object({
+    status: z.enum([
+      'applied',
+      'reviewing',
+      'shortlisted',
+      'interview',
+      'offer',
+      'rejected',
+      'withdrawn',
+    ]),
+    interviewDate: z.coerce.date().optional(),
+  }),
+});
+
 export const updateApplicationSchema = z.object({
   body: z.object({
     status: z.enum([
@@ -88,6 +119,71 @@ export const createApplication = asyncHandler(async (req, res) => {
     }
     throw error;
   }
+});
+
+/** POST /api/applications/tracked */
+export const createTrackedApplication = asyncHandler(async (req, res) => {
+  const { jobTitle, companyName, resumeId } = req.validated.body;
+
+  let resume = null;
+  if (resumeId) {
+    resume = await Resume.findOne({ _id: resumeId, userId: req.user.id });
+    if (!resume) throw new HttpError(400, 'Resume not found.');
+  }
+
+  const application = await Application.create({
+    userId: req.user.id,
+    resumeId: resume?._id,
+    jobTitle,
+    companyName,
+    resumeTitle: resume?.title || '',
+    targetField: resume?.targetField || '',
+    status: 'applied',
+    statusHistory: [{ status: 'applied', changedAt: new Date() }],
+  });
+
+  return created(res, serialize(application));
+});
+
+/** PATCH /api/applications/:id/tracked-status */
+export const updateTrackedStatus = asyncHandler(async (req, res) => {
+  const { status, interviewDate } = req.validated.body;
+
+  const application = await Application.findById(req.params.id);
+  if (!application) throw new HttpError(404, 'Application not found.');
+
+  if (application.userId.toString() !== req.user.id) {
+    throw new HttpError(403, 'You cannot update this application.');
+  }
+  if (application.jobId) {
+    throw new HttpError(
+      400,
+      'This application came from a job posting. Use PATCH /applications/:id instead.',
+    );
+  }
+
+  application.status = status;
+  if (interviewDate) application.interviewDate = interviewDate;
+  application.statusHistory.push({ status, changedAt: new Date() });
+  await application.save();
+
+  return ok(res, serialize(application));
+});
+
+/** DELETE /api/applications/:id/tracked */
+export const deleteTrackedApplication = asyncHandler(async (req, res) => {
+  const application = await Application.findById(req.params.id);
+  if (!application) throw new HttpError(404, 'Application not found.');
+
+  if (application.userId.toString() !== req.user.id) {
+    throw new HttpError(403, 'You cannot delete this application.');
+  }
+  if (application.jobId) {
+    throw new HttpError(400, 'Withdraw a job-board application instead of deleting it.');
+  }
+
+  await application.deleteOne();
+  return ok(res, { deleted: true });
 });
 
 export const getApplication = asyncHandler(async (req, res) => {

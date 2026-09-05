@@ -13,8 +13,50 @@ export const resumeBodySchema = z.object({
     experience: z.array(z.string()).optional(),
     education: z.array(z.string()).optional(),
     skills: z.array(z.string()).optional(),
+
+    // Resume builder fields. All optional, so the original upload-a-file flow
+    // keeps working unchanged.
+    targetField: z.string().optional(),
+    template: z.string().optional(),
+    fullName: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    location: z.string().optional(),
+    linkedin: z.string().optional(),
+    portfolio: z.string().optional(),
+    projects: z.array(z.string()).optional(),
+    certifications: z.array(z.string()).optional(),
   }),
 });
+
+/** Text fields the resume builder writes. */
+const BUILDER_TEXT_FIELDS = [
+  'targetField',
+  'template',
+  'fullName',
+  'email',
+  'phone',
+  'location',
+  'linkedin',
+  'portfolio',
+];
+
+/** List fields the resume builder writes. */
+const BUILDER_LIST_FIELDS = ['projects', 'certifications'];
+
+/**
+ * Copies the resume-builder fields off a request body onto a document.
+ * Absent keys are left alone so a partial update never blanks a field.
+ */
+function applyBuilderFields(resume, body) {
+  for (const field of BUILDER_TEXT_FIELDS) {
+    if (body[field] !== undefined) resume[field] = String(body[field] ?? '');
+  }
+  for (const field of BUILDER_LIST_FIELDS) {
+    const list = parseList(body[field]);
+    if (list) resume[field] = list;
+  }
+}
 
 function serialize(resume) {
   const json = resume.toObject();
@@ -55,6 +97,8 @@ export const createResume = asyncHandler(async (req, res) => {
     fileUrl: req.file ? (await persistUpload(req, req.file)).url : '',
     isDefault: count === 0,
   });
+  applyBuilderFields(resume, body);
+  await resume.save();
   if (resume.isDefault) {
     req.user.defaultResumeId = resume.id;
     await req.user.save();
@@ -78,6 +122,7 @@ export const updateResume = asyncHandler(async (req, res) => {
   if (experience) resume.experience = experience;
   if (education) resume.education = education;
   if (skills) resume.skills = skills;
+  applyBuilderFields(resume, body);
   if (req.file) resume.fileUrl = (await persistUpload(req, req.file)).url;
   await resume.save();
   return ok(res, serialize(resume));
