@@ -64,11 +64,16 @@ const jobSchema = new mongoose.Schema(
 
 jobSchema.index({ title: 'text', company: 'text', description: 'text' });
 
-// One row per board listing. Sparse so the many internal posts, which have
-// no externalId, do not all collide on null.
+// One row per board listing. Partial so the many internal posts, which have
+// no externalId, do not all collide on null. A compound sparse index would
+// still index them, because `source` is always present.
 jobSchema.index(
   { source: 1, externalId: 1 },
-  { unique: true, sparse: true, name: 'job_source_external' },
+  {
+    unique: true,
+    name: 'job_source_external',
+    partialFilterExpression: { externalId: { $type: 'string' } },
+  },
 );
 
 export const Job = mongoose.model('Job', jobSchema);
