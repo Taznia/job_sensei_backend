@@ -5,6 +5,7 @@ import { upload } from '../middleware/upload.js';
 import { validate } from '../middleware/validate.js';
 import * as admin from '../controllers/admin.controller.js';
 import * as ai from '../controllers/ai.controller.js';
+import * as aiResumeMatch from '../controllers/aiResumeMatch.controller.js';
 import * as applications from '../controllers/applications.controller.js';
 import * as auth from '../controllers/auth.controller.js';
 import * as careerProfile from '../controllers/careerProfile.controller.js';
@@ -37,6 +38,24 @@ api.post('/auth/verify-otp', validate(auth.authValidators.otpSchema), auth.verif
 api.post('/auth/reset-password', validate(auth.authValidators.resetSchema), auth.resetPassword);
 api.get('/auth/me', requireAuth, auth.me);
 api.post('/ai/chat', requireAuth, validate(ai.chatSchema), ai.chat);
+
+// --- AI Resume Match --------------------------------------------------------
+// Scores one of the caller's resumes against a pasted job description and keeps
+// the analysis as history. '/history' comes before '/:id' on purpose.
+api.post(
+  '/ai/resume-match',
+  requireAuth,
+  validate(aiResumeMatch.analyseSchema),
+  aiResumeMatch.analyse,
+);
+api.get(
+  '/ai/resume-match/history',
+  requireAuth,
+  validate(aiResumeMatch.historySchema),
+  aiResumeMatch.history,
+);
+api.get('/ai/resume-match/:id', requireAuth, aiResumeMatch.getOne);
+api.delete('/ai/resume-match/:id', requireAuth, aiResumeMatch.remove);
 api.patch(
   '/auth/password',
   requireAuth,
@@ -100,6 +119,23 @@ api.post(
   validate(applications.createApplicationSchema),
   applications.createApplication,
 );
+// --- Application Tracker ----------------------------------------------------
+// Applications the user made outside Job Sensei: no jobId, no recruiter, so the
+// applicant owns the whole timeline.
+api.post(
+  '/applications/tracked',
+  requireAuth,
+  validate(applications.createTrackedApplicationSchema),
+  applications.createTrackedApplication,
+);
+api.patch(
+  '/applications/:id/tracked-status',
+  requireAuth,
+  validate(applications.trackedStatusSchema),
+  applications.updateTrackedStatus,
+);
+api.delete('/applications/:id/tracked', requireAuth, applications.deleteTrackedApplication);
+
 api.get('/applications/:id', requireAuth, applications.getApplication);
 api.patch(
   '/applications/:id',
